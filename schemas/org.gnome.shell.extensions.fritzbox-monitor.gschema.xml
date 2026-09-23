@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.fritzbox-monitor" path="/org/gnome/shell/extensions/fritzbox-monitor/">
+    <key name="router-address" type="s">
+      <default>'192.168.178.1'</default>
+      <summary>FRITZ!Box host or local URL</summary>
+    </key>
+    <key name="username" type="s">
+      <default>''</default>
+      <summary>FRITZ!Box username</summary>
+    </key>
+    <key name="credentials-revision" type="u">
+      <default>0</default>
+      <summary>Refresh marker after keyring changes</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,8 @@
+{
+  "uuid": "fritzbox-monitor@codex.local",
+  "name": "Router Monitor",
+  "description": "Local FRITZ!Box WAN speeds and connected devices",
+  "shell-version": ["46"],
+  "settings-schema": "org.gnome.shell.extensions.fritzbox-monitor",
+  "version": 1
+}
