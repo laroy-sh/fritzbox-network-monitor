@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -48,6 +49,9 @@ class MonitorIndicator extends PanelMenu.Button {
         this.devicesItem = new PopupMenu.PopupSubMenuMenuItem('Connected devices');
         this.menu.addMenuItem(this.devicesItem);
         this.setDevices(null);
+        this.logItem = new PopupMenu.PopupSubMenuMenuItem('Event log');
+        this.menu.addMenuItem(this.logItem);
+        this.setLog(null, 'Not connected');
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.preferencesItem = new PopupMenu.PopupMenuItem('Preferences…');
         this.menu.addMenuItem(this.preferencesItem);
@@ -88,6 +92,24 @@ class MonitorIndicator extends PanelMenu.Button {
                 `${host.name}${detail}${link}`, {reactive: false}));
         }
     }
+
+    setLog(entries, message = 'Event log unavailable') {
+        this.logItem.menu.removeAll();
+        if (entries === null || entries.length === 0) {
+            this.logItem.menu.addMenuItem(new PopupMenu.PopupMenuItem(
+                entries === null ? message : 'No events', {reactive: false}));
+            return;
+        }
+        for (const entry of entries) {
+            const item = new PopupMenu.PopupMenuItem(`${entry.time}  ${entry.message}`,
+                {reactive: false});
+            // Entries can run to several hundred characters; wrap, not widen.
+            item.label.style = 'max-width: 32em;';
+            item.label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            item.label.clutter_text.line_wrap = true;
+            this.logItem.menu.addMenuItem(item);
+        }
+    }
 });
 
 export default class FritzMonitorExtension extends Extension {
@@ -97,6 +119,11 @@ export default class FritzMonitorExtension extends Extension {
         this._settings = this.getSettings();
         this._indicator = new MonitorIndicator();
         this._indicator.preferencesItem.connect('activate', () => this.openPreferences());
+        // The log is large and only read on demand, so fetch it when expanded.
+        this._indicator.logItem.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this._refreshLog();
+        });
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._settingsChangedId = this._settings.connect('changed', () => this._scheduleRestart());
         this._restart();
@@ -137,6 +164,7 @@ export default class FritzMonitorExtension extends Extension {
         this._client = null;
         this._indicator.setStatus('Connecting to FRITZ!Box…');
         this._indicator.setDevices(null);
+        this._indicator.setLog(null, 'Not connected');
 
         const address = this._settings.get_string('router-address').trim();
         const username = this._settings.get_string('username').trim();
@@ -168,6 +196,10 @@ export default class FritzMonitorExtension extends Extension {
             await client.discover();
             if (!this._isCurrent(generation))
                 return;
+            this._indicator.setLog(null, 'Loading…');
+            // Expanded while connecting: that open was ignored, so load now.
+            if (this._indicator.logItem.menu.isOpen)
+                this._refreshLog();
             this._pollWan(generation);
             this._pollHosts(generation);
             this._wanTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
@@ -202,6 +234,7 @@ export default class FritzMonitorExtension extends Extension {
         this._client = null;
         this._indicator.setStatus(LOGIN_FAILED_MESSAGE);
         this._indicator.setDevices(null);
+        this._indicator.setLog(null, 'Not connected');
     }
 
     _isCurrent(generation) {
@@ -220,6 +253,7 @@ export default class FritzMonitorExtension extends Extension {
         this._retryTimer = 0;
         this._wanBusy = false;
         this._hostsBusy = false;
+        this._logBusy = false;
     }
 
     async _pollWan(generation) {
@@ -263,6 +297,30 @@ export default class FritzMonitorExtension extends Extension {
         } finally {
             if (this._isCurrent(generation))
                 this._hostsBusy = false;
+        }
+    }
+
+    async _refreshLog() {
+        const generation = this._generation;
+        if (this._logBusy || !this._client?.ready || !this._isCurrent(generation))
+            return;
+        this._logBusy = true;
+        try {
+            const entries = await this._client.readLog();
+            if (this._isCurrent(generation))
+                this._indicator.setLog(entries, 'Router has no event log');
+        } catch (error) {
+            if (!this._isCurrent(generation))
+                return;
+            if (error.code === AUTH_FAILED)
+                this._stopOnLoginFailure();
+            else if (error.code === '606')
+                this._indicator.setLog(null, 'Router user lacks permission for the event log');
+            else
+                this._indicator.setLog(null);
+        } finally {
+            if (this._isCurrent(generation))
+                this._logBusy = false;
         }
     }
 }

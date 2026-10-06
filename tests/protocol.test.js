@@ -1,7 +1,7 @@
 import Gio from 'gi://Gio';
 
 import {
-    escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseCommonLink, parseDescription,
+    escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseCommonLink, parseDescription, parseDeviceLog,
     parseHost, parseHostCount, parseHostList, parseHostSpeed, parseRouterUrl,
     parseSoap, serviceUrl, soapBody,
 } from '../lib/protocol.js';
@@ -54,6 +54,14 @@ equal(parseHostCount({NewHostNumberOfEntries: '3'}), 3, 'host count');
 equal(parseHost({NewHostName: 'Laptop', NewIPAddress: '192.168.178.7',
     NewActive: '1'}).active, true, 'active host');
 equal(parseHostSpeed({'NewX_AVM-DE_Speed': '866'}), 866, 'link speed');
+const log = parseDeviceLog({NewDeviceLog: '05.10.26 16:41:06 Internet connection established.\n' +
+    'IP address: 192.0.2.1\n05.10.26 16:41:00 Internet connection cleared.\n' +
+    '04.10.26 16:41:00 Older entry.'}, 2);
+equal(log.length, 2, 'event log limit');
+equal(log[0].time, '05.10.26 16:41:06', 'event log time');
+equal(log[0].message, 'Internet connection established. IP address: 192.0.2.1',
+    'event log continuation line');
+equal(parseDeviceLog({}).length, 0, 'empty event log');
 equal(parseRouterUrl('fritz.box'), 'http://fritz.box:49000', 'default URL');
 equal(parseRouterUrl('https://192.168.178.1'), 'https://192.168.178.1:49443',
     'secure URL');

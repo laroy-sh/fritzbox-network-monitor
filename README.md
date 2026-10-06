@@ -2,7 +2,7 @@
 
 A GNOME Shell top-bar extension that reads documented FRITZ!Box TR-064 data from
 your local network. It shows live WAN download/upload rates and connection status,
-plus an active-device list. When the router exposes a device's connection speed,
+plus an active-device list and the router's recent event log. When the router exposes a device's connection speed,
 the menu labels it **link speed**; it is not per-device traffic usage.
 
 ## Requirements
@@ -17,6 +17,9 @@ available. If utilization is absent, it can try
 permission. Device presence uses the documented `Hosts` service: one request
 for the router's host list file when the user has App rights, otherwise one
 request per known host.
+The event log uses `DeviceInfo.GetDeviceLog` and is read only when you expand
+**Event log**; it shows the newest 20 entries and may require the FRITZ!Box
+settings permission.
 
 If the router rejects the login, the extension stops polling until you change
 the credentials in Preferences, because FRITZ!OS makes you wait longer after
