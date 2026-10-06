@@ -28,10 +28,11 @@ FRITZ!OS 7.24 or later) and reads the undocumented `data.lua` online meter page.
 A FRITZ!OS update may change that page; the submenu then reports it as
 unavailable. A rejected web login is not retried until the extension restarts.
 
-A restricted FRITZ!Box user may only get the device list: in testing, an
-account without the **FRITZ!Box settings** permission was refused WAN rates and
-the event log (UPnP error 606) and the web login. The menu says which part
-lacks permission.
+A restricted FRITZ!Box user may be refused the event log (UPnP error 606) and
+the web login; the menu says which part lacks permission. If TR-064 refuses WAN
+data, the extension reads rates and link status from the router's UPnP status
+service (`igddesc.xml`), which needs no login but requires **Home Network →
+Network → Network Settings → Transmit status information over UPnP**.
 
 **Top bar** in Preferences places the indicator on the left, in the center, or
 on the right.

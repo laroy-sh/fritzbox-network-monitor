@@ -2,7 +2,7 @@ import Gio from 'gi://Gio';
 
 import {
     escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseChallenge, parseCommonLink,
-    parseDescription, parseDeviceLog, parseLoginSession, parseOnlineMeter, webOrigin,
+    parseDescription, parseDeviceLog, parseIgdWan, parseLoginSession, parseOnlineMeter, webOrigin,
     parseHost, parseHostCount, parseHostList, parseHostSpeed, parseRouterUrl,
     parseSoap, serviceUrl, soapBody,
 } from '../lib/protocol.js';
@@ -214,6 +214,47 @@ try {
     equal(error.code, AUTH_FAILED, 'login failure is not a fallback case');
 }
 hostsClient.close();
+
+// WAN falls back to the login-free UPnP status when TR-064 refuses (606).
+const igdDescription = `<root><device><serviceList><service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<controlURL>/igdupnp/control/WANCommonIFC1</controlURL><SCPDURL>/igdicfgSCPD.xml</SCPDURL>
+</service></serviceList></device></root>`;
+const igdScpd = '<scpd><actionList><action><name>GetAddonInfos</name></action>' +
+    '<action><name>GetCommonLinkProperties</name></action></actionList></scpd>';
+const wanClient = new FritzClient('192.168.178.1', 'test', 'test');
+wanClient._get = async uri => {
+    if (uri.endsWith('tr64desc.xml'))
+        return description;
+    if (uri.endsWith('igddesc.xml'))
+        return igdDescription;
+    return uri.endsWith('igdicfgSCPD.xml') ? igdScpd : scpd;
+};
+await wanClient.discover();
+const wanCalls = [];
+wanClient._soap = async (service, action) => {
+    wanCalls.push(`${service}:${action}`);
+    if (service === 'WANCommonInterfaceConfig') {
+        const error = new Error('Action Not Authorized');
+        error.code = '606';
+        throw error;
+    }
+    if (action === 'GetAddonInfos')
+        return {NewByteReceiveRate: '698220', NewByteSendRate: '13400'};
+    return {NewPhysicalLinkStatus: 'Up', NewLayer1DownstreamMaxBitRate: '114091000',
+        NewLayer1UpstreamMaxBitRate: '45507000'};
+};
+let wanData = await wanClient.readWan();
+equal(wanData.downBytesPerSecond, 698220, 'UPnP download rate');
+equal(wanData.status, 'Up', 'UPnP link status');
+wanCalls.length = 0;
+wanData = await wanClient.readWan();
+equal(wanCalls.some(call => call.startsWith('WANCommonInterfaceConfig:')), false,
+    'refused TR-064 WAN is not retried');
+wanClient.close();
+equal(parseIgdWan({NewLayer1DownstreamMaxBitRate: '8000'}, {}).downMaxBytesPerSecond, 1000,
+    'UPnP line speed in bytes');
+equal(parseIgdWan({}, {NewByteSendRate: ''}).upBytesPerSecond, null, 'missing UPnP rate');
 
 // Name resolution: HTTP pins the checked address, HTTPS keeps the name for TLS.
 function stubResolver(answers) {
