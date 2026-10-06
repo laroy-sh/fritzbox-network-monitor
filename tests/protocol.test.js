@@ -1,11 +1,13 @@
 import Gio from 'gi://Gio';
 
 import {
-    escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseCommonLink, parseDescription, parseDeviceLog,
+    escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseChallenge, parseCommonLink,
+    parseDescription, parseDeviceLog, parseLoginSession, parseOnlineMeter, webOrigin,
     parseHost, parseHostCount, parseHostList, parseHostSpeed, parseRouterUrl,
     parseSoap, serviceUrl, soapBody,
 } from '../lib/protocol.js';
 import {parseXml} from '../lib/xml.js';
+import {challengeResponse, pbkdf2} from '../lib/webui.js';
 import {AUTH_FAILED, FritzClient} from '../lib/client.js';
 
 let tests = 0;
@@ -62,6 +64,29 @@ equal(log[0].time, '05.10.26 16:41:06', 'event log time');
 equal(log[0].message, 'Internet connection established. IP address: 192.0.2.1',
     'event log continuation line');
 equal(parseDeviceLog({}).length, 0, 'empty event log');
+
+// Web interface login and online meter.
+equal(webOrigin('http://192.168.178.1:49000'), 'http://192.168.178.1', 'web origin');
+equal(webOrigin('https://fritz.box:49443'), 'https://fritz.box', 'secure web origin');
+let session = parseLoginSession('<?xml version="1.0" encoding="utf-8"?><SessionInfo>' +
+    '<SID>0000000000000000</SID><Challenge>2$60000$aa$6000$bb</Challenge>' +
+    '<BlockTime>4</BlockTime></SessionInfo>');
+equal(session.sid, null, 'zero session id is no session');
+equal(session.blockSeconds, 4, 'login block time');
+equal(parseChallenge(session.challenge).iter1, 60000, 'challenge iterations');
+throws(() => parseChallenge('1a2b3c4d'), 'MD5 challenge rejected');
+session = parseLoginSession('<SessionInfo><SID>0123456789abcdef</SID></SessionInfo>');
+equal(session.sid, '0123456789abcdef', 'session id');
+const meterPage = '<table id="tStat"></table><script type="module">\n' +
+    '    const data = {"Today":{"BytesSentHigh":"0","BytesSentLow":"1000",' +
+    '"BytesReceivedHigh":"1","BytesReceivedLow":"5"},"LastMonth":{"BytesSentHigh":"0",' +
+    '"BytesSentLow":"0","BytesReceivedHigh":"0","BytesReceivedLow":"0"}};\n</script>';
+const meter = parseOnlineMeter(meterPage);
+equal(meter.map(period => period.label).join(), 'Today,Last month', 'meter periods in order');
+equal(meter[0].receivedBytes, 2 ** 32 + 5, 'meter combines high and low words');
+equal(meter[0].sentBytes, 1000, 'meter sent bytes');
+throws(() => parseOnlineMeter('<html>login</html>'), 'meter missing from page');
+throws(() => parseOnlineMeter(meterPage.replace('"5"', '"-5"')), 'meter rejects bad counter');
 equal(parseRouterUrl('fritz.box'), 'http://fritz.box:49000', 'default URL');
 equal(parseRouterUrl('https://192.168.178.1'), 'https://192.168.178.1:49443',
     'secure URL');
@@ -228,5 +253,15 @@ try {
 } finally {
     restore();
 }
+
+// RFC 7914 section 11 PBKDF2-HMAC-SHA256 vector, first block.
+const hex = bytes => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+equal(hex(await pbkdf2(new TextEncoder().encode('passwd'), new TextEncoder().encode('salt'), 1)),
+    '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc', 'PBKDF2 vector');
+const cache = new Map();
+const answer = await challengeResponse('passwd', {iter1: 3, salt1: '73616c74', iter2: 2,
+    salt2: '0a0b'}, cache);
+equal(answer.startsWith('0a0b$') && answer.length === 69, true, 'challenge response format');
+equal(cache.size, 1, 'first login stage cached');
 
 print(`${tests} tests passed`);

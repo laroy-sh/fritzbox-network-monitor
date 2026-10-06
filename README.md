@@ -21,6 +21,21 @@ The event log uses `DeviceInfo.GetDeviceLog` and is read only when you expand
 **Event log**; it shows the newest 20 entries and may require the FRITZ!Box
 settings permission.
 
+The **Online meter** submenu shows the data volume for today, yesterday, this
+week, this month and last month. FRITZ!OS only offers it in its web interface,
+so the extension logs in there (PBKDF2 challenge-response via `login_sid.lua`,
+FRITZ!OS 7.24 or later) and reads the undocumented `data.lua` online meter page.
+A FRITZ!OS update may change that page; the submenu then reports it as
+unavailable. A rejected web login is not retried until the extension restarts.
+
+A restricted FRITZ!Box user may only get the device list: in testing, an
+account without the **FRITZ!Box settings** permission was refused WAN rates and
+the event log (UPnP error 606) and the web login. The menu says which part
+lacks permission.
+
+**Top bar** in Preferences places the indicator on the left, in the center, or
+on the right.
+
 If the router rejects the login, the extension stops polling until you change
 the credentials in Preferences, because FRITZ!OS makes you wait longer after
 each failed login.

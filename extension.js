@@ -10,7 +10,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-import {AUTH_FAILED, FritzClient} from './lib/client.js';
+import {AUTH_FAILED, FritzClient, WEB_LOGIN_FAILED} from './lib/client.js';
 import {lookupPassword} from './lib/secrets.js';
 import {parseRouterUrl} from './lib/protocol.js';
 
@@ -27,6 +27,14 @@ function formatRate(bytesPerSecond) {
     if (bits >= 1_000)
         return `${Math.round(bits / 1_000)} kb/s`;
     return `${Math.round(bits)} b/s`;
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1e9)
+        return `${(bytes / 1e9).toFixed(1)} GB`;
+    if (bytes >= 1e6)
+        return `${Math.round(bytes / 1e6)} MB`;
+    return `${Math.round(bytes / 1e3)} kB`;
 }
 
 const MonitorIndicator = GObject.registerClass(
@@ -52,6 +60,9 @@ class MonitorIndicator extends PanelMenu.Button {
         this.logItem = new PopupMenu.PopupSubMenuMenuItem('Event log');
         this.menu.addMenuItem(this.logItem);
         this.setLog(null, 'Not connected');
+        this.meterItem = new PopupMenu.PopupSubMenuMenuItem('Online meter');
+        this.menu.addMenuItem(this.meterItem);
+        this.setMeter(null, 'Not connected');
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.preferencesItem = new PopupMenu.PopupMenuItem('Preferences…');
         this.menu.addMenuItem(this.preferencesItem);
@@ -110,6 +121,20 @@ class MonitorIndicator extends PanelMenu.Button {
             this.logItem.menu.addMenuItem(item);
         }
     }
+
+    setMeter(periods, message = 'Online meter unavailable') {
+        this.meterItem.menu.removeAll();
+        if (periods === null) {
+            this.meterItem.menu.addMenuItem(new PopupMenu.PopupMenuItem(
+                message, {reactive: false}));
+            return;
+        }
+        for (const period of periods) {
+            this.meterItem.menu.addMenuItem(new PopupMenu.PopupMenuItem(
+                `${period.label}  ·  ↓ ${formatBytes(period.receivedBytes)}  ` +
+                `↑ ${formatBytes(period.sentBytes)}`, {reactive: false}));
+        }
+    }
 });
 
 export default class FritzMonitorExtension extends Extension {
@@ -124,8 +149,19 @@ export default class FritzMonitorExtension extends Extension {
             if (open)
                 this._refreshLog();
         });
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
-        this._settingsChangedId = this._settings.connect('changed', () => this._scheduleRestart());
+        const position = this._settings.get_string('panel-position');
+        Main.panel.addToStatusArea(this.uuid, this._indicator,
+            position === 'right' ? 0 : -1, position);
+        this._indicator.meterItem.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this._refreshMeter();
+        });
+        this._settingsChangedId = this._settings.connect('changed', (_settings, key) => {
+            if (key === 'panel-position')
+                this._moveIndicator();
+            else
+                this._scheduleRestart();
+        });
         this._restart();
     }
 
@@ -165,6 +201,7 @@ export default class FritzMonitorExtension extends Extension {
         this._indicator.setStatus('Connecting to FRITZ!Box…');
         this._indicator.setDevices(null);
         this._indicator.setLog(null, 'Not connected');
+        this._indicator.setMeter(null, 'Not connected');
 
         const address = this._settings.get_string('router-address').trim();
         const username = this._settings.get_string('username').trim();
@@ -200,6 +237,9 @@ export default class FritzMonitorExtension extends Extension {
             // Expanded while connecting: that open was ignored, so load now.
             if (this._indicator.logItem.menu.isOpen)
                 this._refreshLog();
+            this._indicator.setMeter(null, 'Loading…');
+            if (this._indicator.meterItem.menu.isOpen)
+                this._refreshMeter();
             this._pollWan(generation);
             this._pollHosts(generation);
             this._wanTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
@@ -235,6 +275,7 @@ export default class FritzMonitorExtension extends Extension {
         this._indicator.setStatus(LOGIN_FAILED_MESSAGE);
         this._indicator.setDevices(null);
         this._indicator.setLog(null, 'Not connected');
+        this._indicator.setMeter(null, 'Not connected');
     }
 
     _isCurrent(generation) {
@@ -254,6 +295,7 @@ export default class FritzMonitorExtension extends Extension {
         this._wanBusy = false;
         this._hostsBusy = false;
         this._logBusy = false;
+        this._meterBusy = false;
     }
 
     async _pollWan(generation) {
@@ -269,6 +311,8 @@ export default class FritzMonitorExtension extends Extension {
                 return;
             if (error.code === AUTH_FAILED)
                 this._stopOnLoginFailure();
+            else if (error.code === '606')
+                this._indicator.setStatus('Router user lacks permission for WAN rates');
             else
                 this._indicator.setStatus(`WAN unavailable: ${error.message}`);
         } finally {
@@ -321,6 +365,41 @@ export default class FritzMonitorExtension extends Extension {
         } finally {
             if (this._isCurrent(generation))
                 this._logBusy = false;
+        }
+    }
+
+    // Moves the indicator without a reconnect. The panel has no public API for
+    // this, so reparent its container the way addToStatusArea placed it.
+    _moveIndicator() {
+        const position = this._settings.get_string('panel-position');
+        const box = {left: Main.panel._leftBox, center: Main.panel._centerBox}[position] ??
+            Main.panel._rightBox;
+        const container = this._indicator.container;
+        container.get_parent()?.remove_child(container);
+        if (box === Main.panel._rightBox)
+            box.insert_child_at_index(container, 0);
+        else
+            box.add_child(container);
+    }
+
+    async _refreshMeter() {
+        const generation = this._generation;
+        if (this._meterBusy || !this._client?.ready || !this._isCurrent(generation))
+            return;
+        this._meterBusy = true;
+        try {
+            const periods = await this._client.readMeter();
+            if (this._isCurrent(generation))
+                this._indicator.setMeter(periods);
+        } catch (error) {
+            if (!this._isCurrent(generation))
+                return;
+            // A rejected web login is reported here only; TR-064 keeps working.
+            this._indicator.setMeter(null, error.code === WEB_LOGIN_FAILED
+                ? 'Router web login failed' : 'Online meter unavailable');
+        } finally {
+            if (this._isCurrent(generation))
+                this._meterBusy = false;
         }
     }
 }

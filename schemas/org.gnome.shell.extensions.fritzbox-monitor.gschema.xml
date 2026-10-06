@@ -13,5 +13,14 @@
       <default>0</default>
       <summary>Refresh marker after keyring changes</summary>
     </key>
+    <key name="panel-position" type="s">
+      <choices>
+        <choice value="left"/>
+        <choice value="center"/>
+        <choice value="right"/>
+      </choices>
+      <default>'right'</default>
+      <summary>Top bar section that holds the indicator</summary>
+    </key>
   </schema>
 </schemalist>

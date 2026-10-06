@@ -104,6 +104,16 @@ export default class FritzMonitorPreferences extends ExtensionPreferences {
             }
         });
 
+        const panelGroup = new Adw.PreferencesGroup({title: 'Top bar'});
+        page.add(panelGroup);
+        const positions = ['left', 'center', 'right'];
+        const position = new Adw.ComboRow({title: 'Position',
+            model: Gtk.StringList.new(['Left', 'Center', 'Right']),
+            selected: Math.max(0, positions.indexOf(settings.get_string('panel-position')))});
+        position.connect('notify::selected', () =>
+            settings.set_string('panel-position', positions[position.selected]));
+        panelGroup.add(position);
+
         window.add(page);
     }
 }
