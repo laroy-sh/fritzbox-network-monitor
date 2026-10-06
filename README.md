@@ -82,3 +82,7 @@ Two scripts need real services and are not part of `make test`:
 - [FRITZ! TR-064 first steps](https://fritz.support/resources/TR-064_First_Steps.pdf)
 - [WAN common interface](https://fritz.support/resources/TR-064_WAN_Common_Interface_Config.pdf)
 - [Hosts service](https://fritz.support/resources/TR-064_Hosts.pdf)
+
+## License
+
+MIT; see [LICENSE](LICENSE).
