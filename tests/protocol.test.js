@@ -1,4 +1,6 @@
+import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Soup from 'gi://Soup?version=3.0';
 
 import {
     escapeXml, NEWEST_SAMPLE_FIRST, parseActions, parseChallenge, parseCommonLink,
@@ -304,5 +306,47 @@ const answer = await challengeResponse('passwd', {iter1: 3, salt1: '73616c74', i
     salt2: '0a0b'}, cache);
 equal(answer.startsWith('0a0b$') && answer.length === 69, true, 'challenge response format');
 equal(cache.size, 1, 'first login stage cached');
+
+// Digest login against a local server that, like FRITZ!OS, rotates its nonce
+// without marking the old one stale.
+const md5 = text => GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, text, -1);
+const digest = {nonce: 'n1', refused: 0};
+const server = new Soup.Server();
+server.add_handler(null, (_server, msg) => {
+    const header = msg.get_request_headers().get_one('Authorization') ?? '';
+    const field = name => new RegExp(`${name}="?([^",]*)`).exec(header)?.[1];
+    const ha1 = md5('test:HTTPS Access:secret');
+    const ha2 = md5(`${msg.get_method()}:${field('uri')}`);
+    const expected = md5([ha1, field('nonce'), field('nc'), field('cnonce'), 'auth', ha2]
+        .join(':'));
+    if (field('nonce') === digest.nonce && field('response') === expected) {
+        msg.set_status(Soup.Status.OK, null);
+        msg.set_response('text/plain', Soup.MemoryUse.COPY, new TextEncoder().encode('ok'));
+        return;
+    }
+    if (header)
+        digest.refused++;
+    msg.get_response_headers().append('WWW-Authenticate',
+        `Digest realm="HTTPS Access",nonce="${digest.nonce}",algorithm=MD5,qop="auth"`);
+    msg.set_status(Soup.Status.UNAUTHORIZED, null);
+});
+server.listen_local(0, Soup.ServerListenOptions.IPV4_ONLY);
+const local = `http://127.0.0.1:${server.get_uris()[0].get_port()}/x`;
+const digestClient = new FritzClient('192.168.178.1', 'test', 'secret');
+equal(await digestClient._get(local), 'ok', 'digest login');
+digest.nonce = 'n2';
+equal(await digestClient._get(local), 'ok', 'digest login after nonce rotation');
+digestClient.close();
+const wrongClient = new FritzClient('192.168.178.1', 'test', 'wrong');
+digest.refused = 0;
+try {
+    await wrongClient._get(local);
+    equal(true, false, 'wrong password refused');
+} catch (error) {
+    equal(error.code, AUTH_FAILED, 'wrong password refused');
+}
+equal(digest.refused, 1, 'wrong password tried once');
+wrongClient.close();
+server.disconnect();
 
 print(`${tests} tests passed`);

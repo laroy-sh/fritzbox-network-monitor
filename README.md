@@ -96,7 +96,7 @@ checks are never disabled.
 | Symptom | Cause and fix |
 | --- | --- |
 | No icon in the top bar | Check `gnome-extensions info fritzbox-monitor@codex.local` shows *Enabled: Yes*. On Wayland, log out and in after installing. With many extensions, another one may hide or reorder top bar items. |
-| *Router login failed; check username and password* | The router rejected the credentials. Polling stops, because FRITZ!OS makes you wait longer after each failed login; it resumes once you save new credentials in Preferences. |
+| *Router login failed; check username and password* | The router rejected the credentials. Polling stops, because FRITZ!OS makes you wait longer after each failed login; it resumes once you save new credentials in Preferences, or after one attempt with **Retry now** in the menu. Each refused request is logged; see `journalctl --user -b /usr/bin/gnome-shell \| grep 'FRITZ!Box monitor'`. |
 | *Router user lacks permission for …* | Give the user more rights; see [Permissions](#permissions). |
 | *Router web login failed* (online meter) | The web interface refused the login, usually because the user lacks web access or rights. It is not retried until the extension restarts or the credentials change. |
 | *Online meter unavailable* | The online meter page changed (it is undocumented, see below) or could not be read. |

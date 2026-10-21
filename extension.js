@@ -50,6 +50,9 @@ class MonitorIndicator extends PanelMenu.Button {
 
         this.statusItem = new PopupMenu.PopupMenuItem('Connecting…', {reactive: false});
         this.menu.addMenuItem(this.statusItem);
+        this.retryItem = new PopupMenu.PopupMenuItem('Retry now');
+        this.retryItem.visible = false;
+        this.menu.addMenuItem(this.retryItem);
         this.ratesItem = new PopupMenu.PopupMenuItem('WAN rates unavailable',
             {reactive: false});
         this.menu.addMenuItem(this.ratesItem);
@@ -144,6 +147,8 @@ export default class FritzMonitorExtension extends Extension {
         this._settings = this.getSettings();
         this._indicator = new MonitorIndicator();
         this._indicator.preferencesItem.connect('activate', () => this.openPreferences());
+        // One login attempt per click, so it cannot add to the router's lockout.
+        this._indicator.retryItem.connect('activate', () => this._restart());
         // The log is large and only read on demand, so fetch it when expanded.
         this._indicator.logItem.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
@@ -198,6 +203,7 @@ export default class FritzMonitorExtension extends Extension {
         this._stopPolling();
         this._client?.close();
         this._client = null;
+        this._indicator.retryItem.visible = false;
         this._indicator.setStatus('Connecting to FRITZ!Box…');
         this._indicator.setDevices(null);
         this._indicator.setLog(null, 'Not connected');
@@ -253,6 +259,7 @@ export default class FritzMonitorExtension extends Extension {
         } catch (error) {
             if (this._isCurrent(generation) && error.code === AUTH_FAILED) {
                 this._indicator.setStatus(LOGIN_FAILED_MESSAGE);
+                this._indicator.retryItem.visible = true;
             } else if (this._isCurrent(generation)) {
                 this._indicator.setStatus(`Router unavailable: ${error.message}`);
                 this._retryTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {
@@ -273,6 +280,7 @@ export default class FritzMonitorExtension extends Extension {
         this._client?.close();
         this._client = null;
         this._indicator.setStatus(LOGIN_FAILED_MESSAGE);
+        this._indicator.retryItem.visible = true;
         this._indicator.setDevices(null);
         this._indicator.setLog(null, 'Not connected');
         this._indicator.setMeter(null, 'Not connected');
